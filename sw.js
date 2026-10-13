@@ -1,5 +1,5 @@
 // Limit Break: hält die App offline startbereit. Neue Versionen kommen, sobald das Gerät online ist.
-const C='limit-break-v2';
+const C='limit-break-v4';
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['./','apple-touch-icon.png'])).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',e=>{e.waitUntil(self.clients.claim());});
 self.addEventListener('fetch',e=>{

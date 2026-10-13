@@ -316,9 +316,9 @@ main>section{display:flex;flex-direction:column;gap:14px}
 .lift-sub{font-size:14px;color:var(--muted);margin-top:4px}
 .lift-chart{margin-top:10px}
 .lift-chart svg{display:block;max-width:100%}
-.lift-line{fill:none;stroke:var(--kraft);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.lift-area{fill:var(--kraft);fill-opacity:.12}
-.lift-dot{fill:var(--kraft);stroke:var(--surface);stroke-width:2}
+.lift-line{fill:none;stroke:var(--lc,var(--kraft));stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lift-area{fill:var(--lc,var(--kraft));fill-opacity:.12}
+.lift-dot{fill:var(--lc,var(--kraft));stroke:var(--surface);stroke-width:2}
 .lift-sel{stroke:var(--text);stroke-opacity:.35;stroke-width:1}
 .lift-val{fill:var(--text);font:700 13px var(--f-display)}
 .lift-read{font-size:14px;color:var(--muted);min-height:20px;margin-top:4px}
@@ -442,7 +442,7 @@ function defaults() {
     ],
     plans:[{from:'2000-01-03', t:{u1:1, u2:1, u3:1, u4:1}}],
     log:[], ach:{}, fx:{gold:[], silver:[], recap:''}, skip:[],
-    lifts:[{id:'x1', name:'Kreuzheben', unit:'kg', step:2.5}, {id:'x2', name:'Bankdrücken', unit:'kg', step:2.5}, {id:'x3', name:'Klimmzüge', unit:'wdh', step:1}], sets:[],
+    lifts:[{id:'x1', name:'Kreuzheben', unit:'kg', step:2.5}, {id:'x2', name:'Bankdrücken', unit:'kg', step:2.5}, {id:'x3', name:'Klimmzüge', unit:'wdh', step:1}, {id:'f1', name:'FTP', unit:'w', step:5}], sets:[], mig:{ftp:1},
     settings:{skin:'arcade', sound:true, loud:false}
   };
 }
@@ -461,7 +461,9 @@ function normalize(s) {
   const dates = a => Array.isArray(a) ? a.filter(x => DATE_RE.test(x)) : [];
   o.fx = {gold:dates(fx.gold), silver:dates(fx.silver), recap:DATE_RE.test(fx.recap) ? fx.recap : ''};
   o.skip = dates(s.skip);
-  o.lifts = Array.isArray(s.lifts) ? s.lifts.filter(x => x && x.id && x.name).map(x => Object.assign({id:String(x.id), name:String(x.name).slice(0, 40), unit:x.unit === 'wdh' ? 'wdh' : 'kg', step:Math.max(.25, Math.min(50, +x.step || (x.unit === 'wdh' ? 1 : 2.5)))}, x.archived ? {archived:true} : {})) : d.lifts;
+  o.lifts = Array.isArray(s.lifts) ? s.lifts.filter(x => x && x.id && x.name).map(x => Object.assign({id:String(x.id), name:String(x.name).slice(0, 40), unit:x.unit === 'wdh' || x.unit === 'w' ? x.unit : 'kg', step:Math.max(.25, Math.min(50, +x.step || LIFT_STEP[x.unit] || 2.5))}, x.archived ? {archived:true} : {})) : d.lifts;
+  o.mig = {ftp:1};
+  if (Array.isArray(s.lifts) && !(s.mig && s.mig.ftp) && !o.lifts.some(x => x.unit === 'w')) o.lifts.push({id:'f1', name:'FTP', unit:'w', step:5});
   o.sets = Array.isArray(s.sets) ? s.sets.filter(e => e && DATE_RE.test(e.d) && e.x && isFinite(+e.v) && +e.v >= 0).map(e => Object.assign({id:String(e.id || newId()), d:e.d, x:String(e.x), v:+e.v}, e.note ? {note:String(e.note).slice(0, 200)} : {})) : [];
   const st = s.settings || {};
   o.settings = {skin:typeof st.skin === 'string' ? st.skin : 'arcade', sound:st.sound !== false, loud:st.loud === true};
@@ -510,7 +512,7 @@ const rankOf = L => L <= RANKS.length ? RANKS[L - 1] : 'Epic Hero +' + (L - RANK
 
 // Eisen-Log: Bestwerte je Übung; ein Eintrag über dem bisherigen Bestwert zählt als Rekord.
 function liftStats(st) {
-  const by = {}, prIds = new Set(); let prs = 0, kg100 = 0, reps10 = 0;
+  const by = {}, prIds = new Set(); let prs = 0, kg100 = 0, reps10 = 0, ftp10 = 0, ftpBest = 0;
   const sorted = st.sets.slice().sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : a.id < b.id ? -1 : 1);
   for (const e of sorted) {
     const b = by[e.x] || (by[e.x] = {list:[], best:null});
@@ -518,8 +520,8 @@ function liftStats(st) {
     if (!b.best || e.v > b.best.v) b.best = e;
     b.list.push(e);
   }
-  for (const x of st.lifts) { const b = by[x.id]; if (!b) continue; if (x.unit === 'kg' && b.best.v >= 100) kg100 = 1; if (x.unit === 'wdh' && b.best.v >= 10) reps10 = 1; }
-  return {by, prIds, prs, kg100, reps10};
+  for (const x of st.lifts) { const b = by[x.id]; if (!b) continue; if (x.unit === 'kg' && b.best.v >= 100) kg100 = 1; if (x.unit === 'wdh' && b.best.v >= 10) reps10 = 1; if (x.unit === 'w' && b.best.v >= b.list[0].v * 1.1) ftp10 = 1; if (x.unit === 'w' && (x.id === 'f1' || /ftp/i.test(x.name))) ftpBest = Math.max(ftpBest, b.best.v); }
+  return {by, prIds, prs, kg100, reps10, ftp10, ftpBest};
 }
 function derive(st) {
   const today = todayKey(), curM = mondayOf(today);
@@ -549,7 +551,7 @@ function derive(st) {
     if (w.cats.kraft && w.cats.rad && w.cats.andere) s.all = 1;
     if (ok || w.status === 'fail') prev = w.status;
   }
-  const L = liftStats(st); xp += L.prs * XP.pr; s.prs = L.prs; s.liftN = st.sets.length; s.kg100 = L.kg100; s.reps10 = L.reps10;
+  const L = liftStats(st); xp += L.prs * XP.pr; s.prs = L.prs; s.liftN = st.sets.length; s.kg100 = L.kg100; s.reps10 = L.reps10; s.ftp10 = L.ftp10; s.ftpBest = L.ftpBest;
   const level = levelOf(xp);
   s.level = level;
   return {today, curM, startM, weeks, weekMap, cur:weekMap.get(curM), stats:s, xp, level, lift:L};
@@ -586,6 +588,15 @@ const ACH = [
   {id:'pr1', n:'Neuer Rekord', d:'Den ersten persönlichen Rekord aufgestellt.', i:'up', c:'kraft', p:s => [s.prs, 1]},
   {id:'pr10', n:'Rekordjäger', d:'10 persönliche Rekorde.', i:'up', c:'kraft', p:s => [s.prs, 10]},
   {id:'kg100', n:'100-kg-Club', d:'Bestwert von mindestens 100 kg in einer Übung.', i:'crown', c:'kraft', p:s => [s.kg100, 1]},
+  {id:'ftp10', n:'Mehr Druck', d:'FTP um mindestens 10 % gesteigert.', i:'bolt', c:'rad', p:s => [s.ftp10, 1]},
+  {id:'ftp250', n:'Kurbelkraft', d:'FTP von 250 Watt erreicht.', i:'bolt', c:'rad', p:s => [s.ftpBest, 250]},
+  {id:'ftp260', n:'Druck aufs Pedal', d:'FTP von 260 Watt erreicht.', i:'bolt', c:'rad', p:s => [s.ftpBest, 260]},
+  {id:'ftp270', n:'Tempohärte', d:'FTP von 270 Watt erreicht.', i:'bolt', c:'rad', p:s => [s.ftpBest, 270]},
+  {id:'ftp280', n:'Kettenspanner', d:'FTP von 280 Watt erreicht.', i:'bike', c:'rad', p:s => [s.ftpBest, 280]},
+  {id:'ftp290', n:'Fluchtgruppe', d:'FTP von 290 Watt erreicht.', i:'bike', c:'rad', p:s => [s.ftpBest, 290]},
+  {id:'ftp300', n:'300er-Club', d:'FTP von 300 Watt erreicht.', i:'star', c:'rad', p:s => [s.ftpBest, 300]},
+  {id:'ftp310', n:'Bergkönig', d:'FTP von 310 Watt erreicht.', i:'star', c:'rad', p:s => [s.ftpBest, 310]},
+  {id:'ftp320', n:'Back to Legend', d:'FTP von 320 Watt erreicht. Zurück auf Legendenniveau.', i:'crown', c:'gold', big:true, p:s => [s.ftpBest, 320]},
   {id:'reps10', n:'Zehn am Stück', d:'Mindestens 10 Wiederholungen in einer Übung.', i:'bolt', c:'kraft', p:s => [s.reps10, 1]},
   {id:'l5', n:'Level 5', d:'Level 5 erreicht.', i:'up', c:'accent', p:s => [s.level, 5]},
   {id:'l10', n:'Level 10', d:'Level 10 erreicht: Rang Epic Hero.', i:'crown', c:'accent', p:s => [s.level, 10]}
@@ -723,7 +734,7 @@ function detect(before, after) {
     else if (w.status === 'silber' && !s.fx.silver.includes(w.m)) { s.fx.silver.push(w.m); ev.push({t:'silver', w}); }
   }
   if (after.level > before.level) ev.push({t:'level', from:before.level, to:after.level});
-  const fresh = ACH.filter(a => !s.ach[a.id] && earned(a, after.stats));
+  const fresh = ACH.filter(a => !s.ach[a.id] && earned(a, after.stats)).sort((a, b) => (b.big ? 1 : 0) - (a.big ? 1 : 0));
   fresh.forEach(a => { s.ach[a.id] = todayKey(); });
   fresh.slice(0, 3).forEach(a => ev.push({t:'ach', a}));
   if (fresh.length > 3) ev.push({t:'more', n:fresh.length - 3});
@@ -771,7 +782,7 @@ function renderBanner() {
   $('#banner').innerHTML = demo ? '<div class="banner"><span>Demo-Daten. Dein echter Stand bleibt unberührt.</span><button data-act="demo-off">Demo beenden</button></div>' : '';
 }
 function renderTabs() {
-  const T = [['start', 'Woche', 'bars'], ['lifts', 'Eisen', 'dumbbell'], ['trophies', 'Medaillen', 'trophy'], ['plan', 'Plan', 'sliders']];
+  const T = [['start', 'Woche', 'bars'], ['lifts', 'Werte', 'dumbbell'], ['trophies', 'Medaillen', 'trophy'], ['plan', 'Plan', 'sliders']];
   $('#tabs').innerHTML = T.map(([id, n, i]) => '<button class="tab" role="tab" aria-selected="' + (tab === id) + '" data-act="tab" data-tab="' + id + '">' + ic(i) + n + '</button>').join('');
 }
 
@@ -936,17 +947,22 @@ function renderPlan() {
 
 /* ---------- Eisen-Log ---------- */
 const liftDraft = {}, liftSel = {};
-const LIFT_START = {kg:40, wdh:5};
+const LIFT_START = {kg:40, wdh:5, w:200}, LIFT_STEP = {kg:2.5, wdh:1, w:5};
+const unitSfx = u => u === 'wdh' ? ' Wdh.' : u === 'w' ? ' W' : ' kg';
+const unitName = u => u === 'wdh' ? 'Wiederholungen' : u === 'w' ? 'Watt' : 'Gewicht';
+const liftCat = x => x.unit === 'w' ? 'rad' : 'kraft';
 const liftById = id => state.lifts.find(x => x.id === id);
 const fmtNumDe = v => v.toLocaleString('de-DE', {maximumFractionDigits:2});
-const fmtVal = (v, u) => fmtNumDe(v) + (u === 'wdh' ? ' Wdh.' : ' kg');
+const fmtVal = (v, u) => fmtNumDe(v) + unitSfx(u);
 const fmtDelta = (d, u) => (d > 0 ? '+' : d < 0 ? '−' : '±') + fmtVal(Math.abs(d), u);
 const parseNum = t => { const v = parseFloat(String(t).replace(/\s|kg|wdh\.?/gi, '').replace(',', '.')); return isFinite(v) && v >= 0 && v < 10000 ? Math.round(v * 100) / 100 : null; };
 const niceStep = r => { const p = Math.pow(10, Math.floor(Math.log10(r))), m = r / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p; };
 function renderLifts() {
   const act = state.lifts.filter(x => !x.archived);
-  let h = '<div class="panel"><h2 class="h2">Eisen-Log</h2><p class="note" style="margin-top:6px">Trag nach dem Training dein Arbeitsgewicht ein. Jeder neue Bestwert bringt +' + XP.pr + ' XP.</p></div>';
-  for (const x of act) h += liftCard(x);
+  let h = '';
+  const iron = act.filter(x => liftCat(x) === 'kraft'), watt = act.filter(x => liftCat(x) === 'rad');
+  if (iron.length) { h += '<div class="panel"><h2 class="h2">Eisen-Log</h2><p class="note" style="margin-top:6px">Trag nach dem Training dein Arbeitsgewicht ein. Jeder neue Bestwert bringt +' + XP.pr + ' XP.</p></div>'; for (const x of iron) h += liftCard(x); }
+  if (watt.length) { h += '<div class="panel"><h2 class="h2">Watt-Log</h2><p class="note" style="margin-top:6px">Trag deinen FTP nach jedem Test ein, etwa nach einem 20-Minuten- oder Rampentest. Auch hier bringt jeder Bestwert +' + XP.pr + ' XP.</p></div>'; for (const x of watt) h += liftCard(x); }
   if (!act.length) h += '<p class="note">Noch keine Übung angelegt.</p>';
   h += '<button class="btn block" data-act="lift-new">' + ic('plus') + 'Übung hinzufügen</button>';
   $('#view-lifts').innerHTML = h;
@@ -954,10 +970,10 @@ function renderLifts() {
 }
 function liftCard(x) {
   const b = D.lift.by[x.id], list = b ? b.list : [], last = list[list.length - 1], prev = list[list.length - 2];
-  const isPR = last && D.lift.prIds.has(last.id), u = x.unit === 'wdh' ? ' Wdh.' : ' kg';
+  const isPR = last && D.lift.prIds.has(last.id), u = unitSfx(x.unit);
   const win = list.filter(e => e.d >= addDays(D.today, -182)), gain = win.length > 1 ? win[win.length - 1].v - win[0].v : 0;
   const draft = liftDraft[x.id] !== undefined ? liftDraft[x.id] : last ? last.v : LIFT_START[x.unit];
-  let h = '<div class="panel lift' + (isPR ? ' pr' : '') + '" id="lift-' + x.id + '"><div class="lift-head"><button class="lift-name" data-act="lift-open" data-id="' + x.id + '" aria-label="' + esc(x.name) + ' bearbeiten"><span class="h2">' + esc(x.name) + '</span><span class="lbl">' + (x.unit === 'wdh' ? 'Wiederholungen' : 'Gewicht') + ' · Verlauf</span></button>' + (isPR ? '<span class="prchip">' + ic('star') + 'Rekord</span>' : '') + '</div>';
+  let h = '<div class="panel lift' + (isPR ? ' pr' : '') + '" id="lift-' + x.id + '" style="--lc:var(--' + liftCat(x) + ')"><div class="lift-head"><button class="lift-name" data-act="lift-open" data-id="' + x.id + '" aria-label="' + esc(x.name) + ' bearbeiten"><span class="h2">' + esc(x.name) + '</span><span class="lbl">' + unitName(x.unit) + ' · Verlauf</span></button>' + (isPR ? '<span class="prchip">' + ic('star') + 'Rekord</span>' : '') + '</div>';
   if (last) {
     const d = prev ? last.v - prev.v : 0;
     h += '<div class="lift-big"><span class="val">' + fmtNumDe(last.v) + '<small>' + u + '</small></span>' + (prev ? '<span class="delta ' + (d > 0 ? 'up' : d < 0 ? 'down' : '') + '">' + (d > 0 ? '▲ ' : d < 0 ? '▼ ' : '') + fmtDelta(d, x.unit) + '</span>' : '') + '</div>' +
@@ -974,7 +990,7 @@ function drawLift(x) {
   const W = Math.max(260, Math.floor(host.clientWidth || 320)), H = 150, pl = 34, pr = 12, pt = 18, pb = 18, ph = H - pt - pb, pw = W - pl - pr;
   const t0 = dateOf(since).getTime(), t1 = dateOf(D.today).getTime(), X = k => pl + (dateOf(k).getTime() - t0) / (t1 - t0) * pw;
   const lo = Math.min(...pts.map(e => e.v)), hi = Math.max(...pts.map(e => e.v));
-  const span = Math.max(hi - lo, x.unit === 'wdh' ? 4 : 10), step = niceStep(span / 3);
+  const span = Math.max(hi - lo, x.unit === 'wdh' ? 4 : x.unit === 'w' ? 20 : 10), step = niceStep(span / 3);
   const y0 = Math.max(0, Math.floor((lo - span * .15) / step) * step), y1 = Math.max(y0 + step, Math.ceil((hi + span * .15) / step) * step);
   const Y = v => pt + ph - (v - y0) / (y1 - y0) * ph;
   let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" role="img" aria-label="Verlauf ' + esc(x.name) + ' in den letzten 6 Monaten">';
@@ -1004,11 +1020,11 @@ function logLift(xid) {
   if (!commit(s => { s.sets.push({id, d:todayKey(), x:xid, v}); }, {pr:{id, name:x.name, unit:x.unit, v, prev}})) return;
   delete liftDraft[xid]; liftSel[xid] = id;
   if (!D.lift.prIds.has(id)) sfx('check');
-  const fh = state.units.find(u => !u.archived && /freihantel/i.test(u.name)), acts = [['lift-undo', 'Rückgängig', id]];
-  if (fh && !state.log.some(e => e.u === fh.id && e.d === todayKey())) acts.push(['quick-unit', 'Freihantel abhaken', fh.id]);
+  const fh = state.units.find(u => !u.archived && (liftCat(x) === 'rad' ? u.cat === 'rad' && /intensiv/i.test(u.name) : /freihantel/i.test(u.name))), acts = [['lift-undo', 'Rückgängig', id]];
+  if (fh && !state.log.some(e => e.u === fh.id && e.d === todayKey())) acts.push(['quick-unit', fh.name.length > 16 ? 'Abhaken' : fh.name + ' abhaken', fh.id]);
   toast(x.name + ': ' + fmtVal(v, x.unit), acts);
   const card = $('#lift-' + xid); if (card) card.classList.add('just');
-  spawn(lastPt.x, lastPt.y, 14, [cssv('--kraft'), cssv('--text')], 6);
+  spawn(lastPt.x, lastPt.y, 14, [cssv('--' + liftCat(x)), cssv('--text')], 6);
 }
 function removeSet(id) { if (commit(s => { s.sets = s.sets.filter(e => e.id !== id); }, {revoke:true})) toast('Eintrag gelöscht.'); }
 function liftSheetHTML() {
@@ -1016,21 +1032,21 @@ function liftSheetHTML() {
     const x = liftById(sheet.id), b = D.lift.by[x.id], list = b ? b.list.slice().reverse() : [];
     let h = sheetHead(esc(x.name), list.length + (list.length === 1 ? ' Eintrag' : ' Einträge')) +
       '<label class="field"><span class="lbl">Name</span><input id="f-lname" value="' + esc(x.name) + '" maxlength="40"></label>' +
-      '<label class="field"><span class="lbl">Schrittweite der Plus-/Minus-Tasten (' + (x.unit === 'wdh' ? 'Wdh.' : 'kg') + ')</span><input id="f-lstep" inputmode="decimal" value="' + fmtNumDe(x.step) + '"></label>' +
+      '<label class="field"><span class="lbl">Schrittweite der Plus-/Minus-Tasten (' + unitSfx(x.unit).trim() + ')</span><input id="f-lstep" inputmode="decimal" value="' + fmtNumDe(x.step) + '"></label>' +
       '<div class="btnrow"><button class="btn danger" data-act="lift-del-ex" data-confirm="Wirklich löschen?">Übung löschen</button><button class="btn primary" data-act="lift-save-ex">Speichern</button></div>';
-    if (list.length) h += '<span class="lbl">Verlauf</span><div class="stack" style="gap:6px">' + list.map(e => '<button class="wk-slot" style="--c:var(--' + (D.lift.prIds.has(e.id) ? 'gold' : 'kraft') + ')" data-act="lift-edit" data-id="' + e.id + '"><span class="t"><b>' + fmtVal(e.v, x.unit) + (D.lift.prIds.has(e.id) ? ' · Rekord' : '') + '</b><span>' + fmtDay(e.d) + ' ' + dateOf(e.d).getFullYear() + (e.note ? ' · ' + esc(e.note) : '') + '</span></span><span class="go">Ändern / Löschen</span></button>').join('') + '</div>';
+    if (list.length) h += '<span class="lbl">Verlauf</span><div class="stack" style="gap:6px">' + list.map(e => '<button class="wk-slot" style="--c:var(--' + (D.lift.prIds.has(e.id) ? 'gold' : liftCat(x)) + ')" data-act="lift-edit" data-id="' + e.id + '"><span class="t"><b>' + fmtVal(e.v, x.unit) + (D.lift.prIds.has(e.id) ? ' · Rekord' : '') + '</b><span>' + fmtDay(e.d) + ' ' + dateOf(e.d).getFullYear() + (e.note ? ' · ' + esc(e.note) : '') + '</span></span><span class="go">Ändern / Löschen</span></button>').join('') + '</div>';
     return h;
   }
   if (sheet.t === 'liftentry') {
     const e = sheet.draft, x = liftById(e.x);
     return sheetHead('Eintrag bearbeiten', esc(x ? x.name : '')) +
-      '<label class="field"><span class="lbl">' + (x && x.unit === 'wdh' ? 'Wiederholungen' : 'Gewicht (kg)') + '</span><input id="f-lval" inputmode="decimal" value="' + fmtNumDe(e.v) + '"></label>' +
+      '<label class="field"><span class="lbl">' + (x ? unitName(x.unit) + (x.unit === 'kg' ? ' (kg)' : x.unit === 'w' ? ' (Watt)' : '') : 'Wert') + '</span><input id="f-lval" inputmode="decimal" value="' + fmtNumDe(e.v) + '"></label>' +
       '<label class="field"><span class="lbl">Datum</span><input type="date" id="f-ldate" value="' + e.d + '" max="' + todayKey() + '"></label>' +
       '<label class="field"><span class="lbl">Kommentar (optional)</span><textarea id="f-lnote" maxlength="200" placeholder="z. B. 3×5, mit Gürtel, ging leicht">' + esc(e.note || '') + '</textarea></label>' +
       '<div class="btnrow"><button class="btn danger" data-act="lift-del-entry" data-confirm="Sicher?">Löschen</button><button class="btn primary" data-act="lift-save-entry">Speichern</button></div>';
   }
   return sheetHead('Übung hinzufügen') + '<label class="field"><span class="lbl">Name</span><input id="f-lnew" maxlength="40" placeholder="z. B. Kniebeugen" data-focus></label>' +
-    '<div class="field"><span class="lbl">Erfasst wird</span><div class="uchips"><button class="uchip" style="--c:var(--kraft)" aria-pressed="' + (sheet.unit === 'kg') + '" data-act="pick-lunit" data-u="kg">Gewicht in kg</button><button class="uchip" style="--c:var(--kraft)" aria-pressed="' + (sheet.unit === 'wdh') + '" data-act="pick-lunit" data-u="wdh">Wiederholungen</button></div></div>' +
+    '<div class="field"><span class="lbl">Erfasst wird</span><div class="uchips"><button class="uchip" style="--c:var(--kraft)" aria-pressed="' + (sheet.unit === 'kg') + '" data-act="pick-lunit" data-u="kg">Gewicht in kg</button><button class="uchip" style="--c:var(--kraft)" aria-pressed="' + (sheet.unit === 'wdh') + '" data-act="pick-lunit" data-u="wdh">Wiederholungen</button><button class="uchip" style="--c:var(--rad)" aria-pressed="' + (sheet.unit === 'w') + '" data-act="pick-lunit" data-u="w">Watt (Rad)</button></div></div>' +
     '<button class="btn primary block" data-act="lift-create">Hinzufügen</button>';
 }
 
@@ -1234,7 +1250,7 @@ function nextFx() {
   if (ev.t === 'gold') { kick = 'Kampfergebnis · KW ' + isoWeek(w.m); art = medalSVG('gold'); title = 'Limit Break'; text = GOLD_TXT[Math.floor(Math.random() * GOLD_TXT.length)](w); res = result(XP.gold); sfx('fanfare'); spawn(0, 0, 150, partyColors(), 5, true); spawn(innerWidth / 2, innerHeight * .4, 60, partyColors(), 11); }
   else if (ev.t === 'silver') { col = 'silver'; kick = 'Kampfergebnis · KW ' + isoWeek(w.m); art = medalSVG('silver'); title = 'Achtungserfolg'; text = w.over ? 'Solide Woche. Der Limit Break war nur eine Einheit entfernt.' : 'Wochenziel erreicht. Eine Einheit fehlt noch zum Limit Break.'; res = result(XP.silver); sfx('silver'); spawn(innerWidth / 2, innerHeight * .4, 45, [cssv('--silver'), cssv('--text'), cssv('--rad')], 9); }
   else if (ev.t === 'fail') { col = 'fail'; quiet = true; kick = 'Kampfergebnis · KW ' + isoWeek(w.m); art = '<div class="fx-hex hex" style="background:var(--surface2);color:var(--fail)">' + ic('x') + '</div>'; title = 'Besiegt'; text = 'Rappel dich auf, die neue Woche läuft schon.'; res = result(0); btn = 'Neue Woche angehen'; sfx('fail'); }
-  else if (ev.t === 'pr') { col = 'kraft'; flip = true; kick = 'Neuer Rekord · ' + ev.name; art = '<div class="fx-hex hex">' + ic('dumbbell') + '</div>'; title = fmtVal(ev.v, ev.unit); text = ev.prev !== null ? 'Alter Bestwert ' + fmtVal(ev.prev, ev.unit) + '. Das sind ' + fmtDelta(ev.v - ev.prev, ev.unit) + '.' : 'Neuer Bestwert.'; xp = '+' + XP.pr + ' XP Rekordbonus'; sfx('ach'); spawn(innerWidth / 2, innerHeight * .4, 70, partyColors(), 11); }
+  else if (ev.t === 'pr') { col = ev.unit === 'w' ? 'rad' : 'kraft'; flip = true; kick = 'Neuer Rekord · ' + ev.name; art = '<div class="fx-hex hex">' + ic(ev.unit === 'w' ? 'bolt' : 'dumbbell') + '</div>'; title = fmtVal(ev.v, ev.unit); text = ev.prev !== null ? 'Alter Bestwert ' + fmtVal(ev.prev, ev.unit) + '. Das sind ' + fmtDelta(ev.v - ev.prev, ev.unit) + '.' : 'Neuer Bestwert.'; xp = '+' + XP.pr + ' XP Rekordbonus'; sfx('ach'); spawn(innerWidth / 2, innerHeight * .4, 70, partyColors(), 11); }
   else if (ev.t === 'ach') { col = ev.a.c; flip = true; kick = 'Mini-Medaille gefunden'; art = '<div class="fx-hex hex">' + ic(ev.a.i) + '</div>'; title = ev.a.n; text = ev.a.d; sfx('ach'); spawn(innerWidth / 2, innerHeight * .4, 50, partyColors(), 10); }
   else if (ev.t === 'more') { col = 'accent'; kick = 'Mini-Medaillen'; art = '<div class="fx-hex hex">+' + ev.n + '</div>'; title = ev.n + ' weitere'; text = 'Noch ' + ev.n + (ev.n === 1 ? ' Mini-Medaille' : ' Mini-Medaillen') + ' gefunden. Du findest sie unter Medaillen.'; }
   else if (ev.t === 'level') { col = 'accent'; flip = true; kick = 'Level-Aufstieg'; art = '<div class="fx-hex hex">' + ev.to + '</div>'; title = 'Level ' + ev.to; const sk = SKINS.filter(k => k.req && k.req.lvl > ev.from && k.req.lvl <= ev.to).map(k => k.n); text = 'Neuer Rang: ' + rankOf(ev.to) + '.' + (sk.length ? ' Neuer Skin freigeschaltet: ' + sk.join(', ') + '.' : ''); sfx('level'); spawn(innerWidth / 2, innerHeight * .4, 60, partyColors(), 11); }
@@ -1261,7 +1277,7 @@ function makeDemo() {
   }
   for (let i = 25; i >= 0; i--) {
     const m = addDays(cur, -7 * i); if (m > today || rnd() < .18) continue;
-    for (const [x, a, b, st] of [['x1', 100, 125, 2.5], ['x2', 70, 82.5, 2.5], ['x3', 6, 10, 1]]) s.sets.push({id:newId(), d:m, x, v:Math.max(0, Math.round((a + (b - a) * (25 - i) / 25 + (rnd() - .6) * st * 2) / st) * st)});
+    for (const [x, a, b, st] of [['x1', 100, 125, 2.5], ['x2', 70, 82.5, 2.5], ['x3', 6, 10, 1]].concat(i % 4 === 1 ? [['f1', 235, 262, 1]] : [])) s.sets.push({id:newId(), d:m, x, v:Math.max(0, Math.round((a + (b - a) * (25 - i) / 25 + (rnd() - .6) * st * 2) / st) * st)});
   }
   s.updatedAt = 1;
   const d = derive(s); markAll(s, d);
@@ -1380,7 +1396,7 @@ document.addEventListener('click', ev => {
     case 'lift-del-entry': if (armed(el)) { const id = sheet.draft.id; closeSheet(); removeSet(id); } break;
     case 'lift-new': openSheet({t:'liftnew', unit:'kg'}); break;
     case 'pick-lunit': sheet.unit = d.u; document.querySelectorAll('[data-act="pick-lunit"]').forEach(c => c.setAttribute('aria-pressed', c.dataset.u === d.u)); break;
-    case 'lift-create': { const name = $('#f-lnew').value.trim().slice(0, 40), unit = sheet.unit, id = 'x' + Date.now().toString(36); if (!name) { toast('Bitte einen Namen eingeben.'); break; } closeSheet(); commit(s => { s.lifts.push({id, name, unit, step:unit === 'wdh' ? 1 : 2.5}); }); break; }
+    case 'lift-create': { const name = $('#f-lnew').value.trim().slice(0, 40), unit = sheet.unit, id = 'x' + Date.now().toString(36); if (!name) { toast('Bitte einen Namen eingeben.'); break; } closeSheet(); commit(s => { s.lifts.push({id, name, unit, step:LIFT_STEP[unit]}); }); break; }
     case 'fx-next': nextFx(); break;
   }
 });
